@@ -11,13 +11,33 @@ import {
 } from "remotion";
 import { Audio } from "@remotion/media";
 import { Input, ALL_FORMATS, UrlSource } from "mediabunny";
-import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
+import { loadFont as loadTextFont } from "@remotion/google-fonts/BeVietnamPro";
+import { loadFont as loadDataFont } from "@remotion/google-fonts/JetBrainsMono";
 import { VNIndexBar } from "./fetchVNIndex";
 
-const { fontFamily } = loadFont("normal", {
-  weights: ["400", "500", "700", "800"],
+// Two families with distinct roles (per frontend-design guidance): Be Vietnam
+// Pro carries Vietnamese prose (dates, labels), JetBrains Mono carries every
+// number and code — grounded in how an exchange ticker board actually reads.
+const { fontFamily: textFont } = loadTextFont("normal", {
+  weights: ["400", "500", "700"],
   subsets: ["latin", "vietnamese"],
 });
+const { fontFamily: dataFont } = loadDataFont("normal", {
+  weights: ["500", "700", "800"],
+  subsets: ["latin"],
+});
+
+// A near-black board casing rather than a decorative gradient — the palette
+// of an LED exchange ticker, not a generic dark-mode SaaS card.
+const COLORS = {
+  bg: "#08090a",
+  panel: "#0c0e0c",
+  hairline: "rgba(255,255,255,0.09)",
+  dim: "rgba(228,232,225,0.34)",
+  faint: "rgba(228,232,225,0.18)",
+};
+// LED colors: green = tăng, red = giảm (international convention, by request), amber = đứng giá.
+const LED = { up: "#2ee878", down: "#ff3b3b", flat: "#ffb020" };
 
 const WIDTH = 1080;
 const HEIGHT = 1080;
@@ -199,9 +219,9 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
     return (
       <AbsoluteFill
         style={{
-          backgroundColor: "#0b1220",
+          backgroundColor: COLORS.bg,
           color: "white",
-          fontFamily,
+          fontFamily: textFont,
           fontSize: 44,
           justifyContent: "center",
           alignItems: "center",
@@ -221,13 +241,10 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
   const isUp = change > 0;
   const isFlat = Math.abs(change) < 0.005;
 
-  // VN market convention: up = red, down = green, flat = yellow.
-  const accentColor = isFlat ? "#eab308" : isUp ? "#ef4444" : "#22c55e";
-  const accentColorSoft = isFlat
-    ? "rgba(234,179,8,0.15)"
-    : isUp
-      ? "rgba(239,68,68,0.15)"
-      : "rgba(34,197,94,0.15)";
+  // International convention (by request): up = green, down = red, flat = amber.
+  const accentColor = isFlat ? LED.flat : isUp ? LED.up : LED.down;
+  const trendLabel = isFlat ? "ĐI NGANG" : isUp ? "TĂNG" : "GIẢM";
+  const trendArrow = isFlat ? "◆" : isUp ? "▲" : "▼";
 
   // --- Voiceover sync beats ---
   // Convert each beats.json timestamp (ms into the narration) to an absolute
@@ -293,10 +310,24 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
 
   // --- Ambient idle loop (keeps the remaining ~58s alive without new data) ---
   const idleT = Math.max(0, frame - IDLE_START) / FPS; // seconds since idle started
-  const orbX = 50 + Math.sin(idleT * 0.35) * 22;
-  const orbY = 42 + Math.cos(idleT * 0.27) * 18;
   const badgeBreathe = 1 + Math.sin(idleT * Math.PI * 0.5) * 0.02;
-  const glowPulse = 0.5 + Math.sin(idleT * Math.PI * 0.5) * 0.15;
+
+  // "LIVE" dot in the header — blinks at ~0.8Hz, like a board's update indicator.
+  const liveBlink = Math.sin(frame * 0.17) > 0 ? 1 : 0.2;
+
+  // A soft light band that sweeps down the board every ~7s, like an LED
+  // panel's refresh scan. Fades in only once the entrance has settled.
+  const scanLoopFrames = 7 * FPS;
+  const scanProgress = (Math.max(0, frame - IDLE_START) % scanLoopFrames) / scanLoopFrames;
+  const scanY = scanProgress * (HEIGHT - 96);
+  const scanOpacity = interpolate(frame, [IDLE_START, IDLE_START + 20], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  // Tiny per-frame brightness flicker on the big number, like a real LED
+  // display never quite holding perfectly steady current.
+  const digitFlicker = 0.96 + Math.sin(frame * 1.7) * 0.02 + Math.sin(frame * 3.1) * 0.015;
 
   // Marker that slowly travels back and forth along the trend line.
   const travelLoop = 6 * FPS; // 6s to cross the chart, then reverse
@@ -322,32 +353,18 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
     }
   }
 
+  const ghostNumber = formatPoints(displayedClose).replace(/[0-9]/g, "8");
+
   return (
     <AbsoluteFill
       style={{
-        fontFamily,
-        background: "linear-gradient(160deg, #0b1220 0%, #111c33 55%, #0b1220 100%)",
+        fontFamily: textFont,
+        background: `radial-gradient(120% 90% at 50% 28%, ${COLORS.panel} 0%, ${COLORS.bg} 72%)`,
       }}
     >
       {hasVoiceover && (
         <Audio src={staticFile("voiceover/vnindex-latest.mp3")} from={20} />
       )}
-
-      {/* Ambient glow orb, slowly drifting behind the card */}
-      <div
-        style={{
-          position: "absolute",
-          left: `${orbX}%`,
-          top: `${orbY}%`,
-          translate: "-50% -50%",
-          width: 640,
-          height: 640,
-          borderRadius: "50%",
-          background: accentColor,
-          opacity: glowPulse * 0.18,
-          filter: "blur(140px)",
-        }}
-      />
 
       <AbsoluteFill
         style={{
@@ -356,113 +373,178 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
         }}
       >
         <Interactive.Div
-          name="Card"
+          name="Board"
           style={{
             width: WIDTH - 96,
             height: HEIGHT - 96,
-            borderRadius: 40,
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.03)",
-            boxShadow: "0 40px 80px rgba(0,0,0,0.5)",
-            scale: interpolate(cardIn, [0, 1], [0.94, 1], {
+            borderRadius: 10,
+            border: `1px solid ${COLORS.hairline}`,
+            background: COLORS.panel,
+            boxShadow: "inset 0 0 90px rgba(0,0,0,0.45)",
+            scale: interpolate(cardIn, [0, 1], [0.97, 1], {
               easing: Easing.bezier(0.16, 1, 0.3, 1),
               output: "perceptual-scale",
             }),
             opacity: cardIn,
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
-            padding: "56px 64px 36px",
+            padding: "40px 48px 30px",
+            position: "relative",
+            overflow: "hidden",
           }}
         >
-          {/* Header */}
+          {/* Refresh-scan sweep, like an LED panel redrawing itself */}
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: scanY - 70,
+              height: 140,
+              background: `linear-gradient(180deg, transparent, ${accentColor}12 45%, ${accentColor}1a 50%, ${accentColor}12 55%, transparent)`,
+              opacity: scanOpacity,
+              pointerEvents: "none",
+            }}
+          />
+
+          {/* Header: ticker code plate (left) + session date (right) — not a
+              decorative eyebrow, this is how a board actually labels itself. */}
           <Interactive.Div
             name="Header"
             style={{
               opacity: headerIn,
-              translate: `0px ${interpolate(headerIn, [0, 1], [12, 0])}px`,
+              translate: `0px ${interpolate(headerIn, [0, 1], [10, 0])}px`,
               display: "flex",
-              flexDirection: "column",
+              justifyContent: "space-between",
               alignItems: "center",
-              gap: 8,
+              width: "100%",
             }}
           >
-            <div
-              style={{
-                fontSize: 30,
-                letterSpacing: 6,
-                fontWeight: 700,
-                color: "rgba(255,255,255,0.55)",
-              }}
-            >
-              VN-INDEX · HOSE
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  fontFamily: dataFont,
+                  fontWeight: 700,
+                  fontSize: 22,
+                  letterSpacing: 0.5,
+                  color: "white",
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 4,
+                  padding: "5px 10px",
+                }}
+              >
+                VNINDEX
+              </div>
+              <div style={{ fontSize: 19, color: COLORS.dim }}>Sàn HOSE</div>
             </div>
-            <div
-              style={{
-                fontSize: 26,
-                fontWeight: 400,
-                color: "rgba(255,255,255,0.4)",
-                textTransform: "capitalize",
-              }}
-            >
-              {formatDate(latest.time)}
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <div
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: "50%",
+                    background: LED.up,
+                    opacity: liveBlink,
+                    boxShadow: `0 0 6px ${LED.up}`,
+                  }}
+                />
+                <span style={{ fontFamily: dataFont, fontSize: 13, letterSpacing: 1, color: COLORS.dim }}>
+                  TRỰC TIẾP
+                </span>
+              </div>
+              <div style={{ fontSize: 19, color: COLORS.dim, textTransform: "capitalize" }}>
+                {formatDate(latest.time)}
+              </div>
             </div>
           </Interactive.Div>
 
-          {/* Big number */}
+          {/* Big number — ghost digits (all "8") sit behind the lit value, the
+              way an unpowered 7-segment display still shows its dark segments. */}
           <Interactive.Div
             name="BigNumber"
             style={{
-              marginTop: 32,
-              fontSize: 150,
-              fontWeight: 800,
-              color: "white",
-              lineHeight: 1,
-              letterSpacing: -2,
-              scale: 1 + headlinePulse * 0.035,
-              textShadow: `0 0 ${headlinePulse * 60}px ${accentColor}${headlinePulse > 0.05 ? "aa" : "00"}`,
+              marginTop: 38,
+              display: "grid",
             }}
           >
-            {formatPoints(displayedClose)}
+            <div
+              style={{
+                gridArea: "1 / 1",
+                fontFamily: dataFont,
+                fontWeight: 800,
+                fontSize: 140,
+                lineHeight: 1,
+                letterSpacing: -2,
+                color: `${accentColor}22`,
+              }}
+            >
+              {ghostNumber}
+            </div>
+            <div
+              style={{
+                gridArea: "1 / 1",
+                fontFamily: dataFont,
+                fontWeight: 800,
+                fontSize: 140,
+                lineHeight: 1,
+                letterSpacing: -2,
+                color: "white",
+                opacity: digitFlicker,
+                scale: 1 + headlinePulse * 0.03,
+                textShadow: `0 0 ${(16 + headlinePulse * 24) * digitFlicker}px ${accentColor}${headlinePulse > 0.05 ? "cc" : "66"}`,
+              }}
+            >
+              {formatPoints(displayedClose)}
+            </div>
           </Interactive.Div>
 
-          {/* Change badge */}
+          {/* Change readout — a bracketed data tag, not a soft tinted pill */}
           <Interactive.Div
             name="ChangeBadge"
             style={{
-              marginTop: 20,
+              marginTop: 22,
               opacity: badgeIn,
               scale:
-                interpolate(badgeIn, [0, 1], [0.9, 1], {
+                interpolate(badgeIn, [0, 1], [0.95, 1], {
                   easing: Easing.spring({ damping: 200 }),
                   output: "perceptual-scale",
                 }) *
                 badgeBreathe *
                 (1 + headlinePulse * 0.05),
+              alignSelf: "flex-start",
               display: "flex",
               alignItems: "center",
-              gap: 12,
-              padding: "12px 28px",
-              borderRadius: 999,
-              background: accentColorSoft,
-              border: `1px solid ${accentColor}55`,
+              gap: 16,
+              padding: "10px 20px",
+              border: `1.5px solid ${accentColor}`,
+              borderRadius: 6,
+              fontFamily: dataFont,
+              fontWeight: 700,
+              fontSize: 32,
+              color: accentColor,
             }}
           >
-            <div style={{ fontSize: 40, fontWeight: 700, color: accentColor }}>
-              {isFlat ? "◆" : isUp ? "▲" : "▼"}
-            </div>
-            <div style={{ fontSize: 40, fontWeight: 700, color: accentColor }}>
+            <span>{trendArrow}</span>
+            <span>
               {isUp ? "+" : ""}
-              {formatPoints(change)} ({isUp ? "+" : ""}
-              {changePercent.toFixed(2)}%)
-            </div>
+              {formatPoints(change)}
+            </span>
+            <span style={{ width: 1, height: 24, background: `${accentColor}55` }} />
+            <span>
+              {isUp ? "+" : ""}
+              {changePercent.toFixed(2)}%
+            </span>
+            <span style={{ fontFamily: textFont, fontSize: 18, fontWeight: 500, opacity: 0.85 }}>
+              {trendLabel}
+            </span>
           </Interactive.Div>
 
-          {/* Chart */}
+          {/* Chart — thin readout line over a hairline grid, not a soft glow card */}
           <Interactive.Div
             name="Chart"
             style={{
-              marginTop: 36,
+              marginTop: 34,
               width: chartWidth,
               scale: 1 + range30Pulse * 0.02,
               opacity: interpolate(chartIn, [0, 0.3], [0, 1], {
@@ -478,15 +560,27 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
             >
               <defs>
                 <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={accentColor} stopOpacity={0.35} />
+                  <stop offset="0%" stopColor={accentColor} stopOpacity={0.22} />
                   <stop offset="100%" stopColor={accentColor} stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="sweepFill" x1="0" y1="0" x2="1" y2="0">
                   <stop offset="0%" stopColor="white" stopOpacity={0} />
-                  <stop offset="50%" stopColor="white" stopOpacity={0.9} />
+                  <stop offset="50%" stopColor="white" stopOpacity={0.85} />
                   <stop offset="100%" stopColor="white" stopOpacity={0} />
                 </linearGradient>
               </defs>
+              {/* Reference gridlines, like a board's graph readout */}
+              {[0.25, 0.5, 0.75].map((t) => (
+                <line
+                  key={t}
+                  x1={0}
+                  x2={chartWidth}
+                  y1={chartHeight * t}
+                  y2={chartHeight * t}
+                  stroke={COLORS.hairline}
+                  strokeWidth={1}
+                />
+              ))}
               <path d={areaPath} fill="url(#areaFill)" opacity={chartIn} />
               {/* Highlight sweep across the 30-day range, timed to the "range30" narration beat */}
               {range30Pulse > 0.01 && (
@@ -510,7 +604,7 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
                 d={linePath}
                 fill="none"
                 stroke={accentColor}
-                strokeWidth={5}
+                strokeWidth={3}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 pathLength={1}
@@ -521,17 +615,17 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
               <circle
                 cx={travelPoint.x}
                 cy={travelPoint.y}
-                r={18}
+                r={14}
                 fill={accentColor}
-                opacity={chartIn * 0.25}
+                opacity={chartIn * 0.2}
               />
               <circle
                 cx={travelPoint.x}
                 cy={travelPoint.y}
-                r={7}
+                r={5}
                 fill={accentColor}
                 stroke="white"
-                strokeWidth={2}
+                strokeWidth={1.5}
                 opacity={chartIn}
               />
             </svg>
@@ -539,9 +633,9 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                marginTop: 12,
-                fontSize: 26,
-                color: "rgba(255,255,255,0.45)",
+                marginTop: 10,
+                fontSize: 19,
+                color: COLORS.dim,
               }}
             >
               <span>{formatDate(bars[0].time).split(",")[0]}</span>
@@ -550,48 +644,50 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
             </div>
           </Interactive.Div>
 
-          {/* Up/down days — revealed in sync with the "trend30" narration beat */}
+          {/* Up/down days — one bracketed row, split by a hairline, matching the
+              change readout's visual language instead of two loose pills. */}
           <Interactive.Div
             name="TrendDaysRow"
             style={{
-              marginTop: 14,
+              marginTop: 18,
               opacity: trendRowIn,
               translate: `0px ${interpolate(trendRowIn, [0, 1], [10, 0])}px`,
               display: "flex",
-              gap: 16,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 6,
+              overflow: "hidden",
             }}
           >
             <div
               style={{
+                flex: 1,
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "8px 18px",
-                borderRadius: 999,
-                background: "rgba(239,68,68,0.12)",
-                border: "1px solid rgba(239,68,68,0.35)",
-                fontSize: 22,
-                fontWeight: 700,
-                color: "#ef4444",
+                justifyContent: "center",
+                gap: 10,
+                padding: "10px 12px",
+                borderRight: `1px solid ${COLORS.hairline}`,
               }}
             >
-              ▲ {upDays} phiên tăng
+              <span style={{ fontFamily: dataFont, fontWeight: 700, fontSize: 22, color: LED.up }}>
+                ▲ {upDays}
+              </span>
+              <span style={{ fontSize: 18, color: COLORS.dim }}>phiên tăng</span>
             </div>
             <div
               style={{
+                flex: 1,
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "8px 18px",
-                borderRadius: 999,
-                background: "rgba(34,197,94,0.12)",
-                border: "1px solid rgba(34,197,94,0.35)",
-                fontSize: 22,
-                fontWeight: 700,
-                color: "#22c55e",
+                justifyContent: "center",
+                gap: 10,
+                padding: "10px 12px",
               }}
             >
-              ▼ {downDays} phiên giảm
+              <span style={{ fontFamily: dataFont, fontWeight: 700, fontSize: 22, color: LED.down }}>
+                ▼ {downDays}
+              </span>
+              <span style={{ fontSize: 18, color: COLORS.dim }}>phiên giảm</span>
             </div>
           </Interactive.Div>
 
@@ -604,22 +700,29 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
               width: "100%",
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center",
-              paddingTop: 20,
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-              fontSize: 26,
-              color: "rgba(255,255,255,0.5)",
+              alignItems: "baseline",
+              paddingTop: 18,
+              borderTop: `1px solid ${COLORS.hairline}`,
+              fontSize: 18,
+              color: COLORS.dim,
             }}
           >
-            <span
-              style={{
-                color: `rgba(255,255,255,${0.5 + todayDetailPulse * 0.5})`,
-                scale: 1 + todayDetailPulse * 0.06,
-              }}
-            >
-              KLGD: {formatVolume(latest.volume)}
+            <span>
+              KLGD{" "}
+              <span
+                style={{
+                  fontFamily: dataFont,
+                  fontWeight: 700,
+                  fontSize: 19,
+                  color: `rgba(255,255,255,${0.75 + todayDetailPulse * 0.25})`,
+                  scale: 1 + todayDetailPulse * 0.06,
+                  display: "inline-block",
+                }}
+              >
+                {formatVolume(latest.volume)}
+              </span>
             </span>
-            <span>Nguồn: VNDirect</span>
+            <span style={{ color: COLORS.faint }}>Nguồn: VNDirect</span>
           </Interactive.Div>
         </Interactive.Div>
       </AbsoluteFill>

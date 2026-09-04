@@ -3,11 +3,13 @@
 // free "Read Aloud" TTS service (via the msedge-tts package) — no account or
 // API key needed.
 //
-// The script is built as exactly six single-sentence segments (hook,
-// headline, todayDetail, range30, trend30, outro). Edge TTS's sentence-
-// boundary metadata gives each segment's start time in the generated audio,
-// which is written to public/voiceover/vnindex-latest.beats.json so the
-// video can trigger visual "beats" in sync with the narration.
+// The script is built as six segments (hook, headline, todayDetail, range30,
+// trend30, outro), each made of one or more SHORT sentences — short sentences
+// with real full stops give the narration natural pauses instead of reading
+// like one long data dump. Edge TTS's sentence-boundary metadata gives the
+// start time of every sentence; each segment's "beat" (for visual sync) is
+// the start time of its first sentence, written to
+// public/voiceover/vnindex-latest.beats.json.
 //
 // Writes:
 //   public/voiceover/vnindex-latest.mp3
@@ -24,6 +26,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 
 const voiceName = process.env.EDGE_TTS_VOICE || "vi-VN-HoaiMyNeural"; // vi-VN-NamMinhNeural for a male voice
+// Slightly slower than default reads as less rushed / more natural for a
+// narration full of numbers (the ear needs a beat longer to parse a number
+// than a word).
+const speechRate = process.env.EDGE_TTS_RATE || "-3%";
 
 const dataPath = path.join(root, "public", "vnindex.json");
 const bars = JSON.parse(readFileSync(dataPath, "utf-8"));
@@ -74,34 +80,37 @@ const volumeRatio = latest.volume / (avgVolume30 || 1);
 const isBigMove = Math.abs(changePercent) >= 1.5;
 const isVolumeSpike = volumeRatio >= 1.3;
 
-// --- Build the script as exactly six single-sentence segments ---
-// (each ends with exactly one '.'/'!' and has no other sentence-ending
-// punctuation inside, so Edge TTS's sentence-boundary count lines up 1:1
-// with this array for timing sync.)
+// --- Build the script as six segments, each a list of short sentences ---
 
 let hook;
 if (isNewHigh && change > 0) {
-  hook = "Tin vui cho nhà đầu tư, VN Index vừa xác lập đỉnh cao mới trong ba mươi phiên giao dịch gần đây.";
+  hook = "Tin vui cho nhà đầu tư. VN Index vừa xác lập đỉnh cao mới trong ba mươi phiên gần đây.";
 } else if (isNewLow && change < 0) {
-  hook = "Thị trường vừa ghi nhận một phiên giảm điểm đáng chú ý, đưa VN Index về mức thấp nhất trong ba mươi phiên gần đây.";
+  hook = "Thị trường vừa có một phiên giảm điểm đáng chú ý. VN Index rơi về mức thấp nhất trong ba mươi phiên gần đây.";
 } else if (isBigMove && change > 0) {
   hook = "Một phiên giao dịch bùng nổ đã diễn ra trên thị trường chứng khoán Việt Nam hôm nay.";
 } else if (isBigMove && change < 0) {
-  hook = "Sắc đỏ bao trùm thị trường chứng khoán Việt Nam trong phiên giao dịch hôm nay.";
+  hook = "Sắc đỏ bao trùm thị trường chứng khoán Việt Nam trong phiên hôm nay.";
 } else if (isVolumeSpike) {
-  hook = "Thanh khoản thị trường bất ngờ sôi động hơn hẳn so với những phiên gần đây.";
+  hook = "Thanh khoản thị trường hôm nay bất ngờ sôi động hơn hẳn những phiên gần đây.";
 } else {
   const genericHooks = [
     "Cùng điểm qua diễn biến thị trường chứng khoán Việt Nam hôm nay.",
     "Đây là bản tin nhanh cập nhật thị trường chứng khoán Việt Nam.",
-    "Thị trường chứng khoán Việt Nam khép lại một phiên giao dịch mới với nhiều diễn biến đáng chú ý.",
+    "Thị trường chứng khoán Việt Nam vừa khép lại một phiên giao dịch mới.",
   ];
   hook = genericHooks[Math.floor(Math.random() * genericHooks.length)];
 }
 
-const headline = isFlat
-  ? `Chỉ số VN Index đóng cửa phiên ${dateStr} tại ${fmt(latest.close)} điểm, gần như đi ngang so với phiên liền trước.`
-  : `Chỉ số VN Index đóng cửa phiên ${dateStr} tại ${fmt(latest.close)} điểm, ${trendWord} ${fmt(Math.abs(change))} điểm, tương ứng ${fmt(Math.abs(changePercent))} phần trăm so với phiên liền trước.`;
+const headlineSentences = isFlat
+  ? [
+      `Chỉ số VN Index đóng cửa phiên ${dateStr} tại ${fmt(latest.close)} điểm.`,
+      "Gần như đi ngang so với phiên liền trước.",
+    ]
+  : [
+      `Chỉ số VN Index đóng cửa phiên ${dateStr} tại ${fmt(latest.close)} điểm.`,
+      `${trendWord.charAt(0).toUpperCase()}${trendWord.slice(1)} ${fmt(Math.abs(change))} điểm, tương ứng ${fmt(Math.abs(changePercent))} phần trăm so với phiên trước.`,
+    ];
 
 const volumeAdj = isVolumeSpike
   ? "sôi động hơn hẳn so với trung bình gần đây"
@@ -109,35 +118,48 @@ const volumeAdj = isVolumeSpike
     ? "khá trầm lắng so với trung bình gần đây"
     : "ở mức tương đương trung bình gần đây";
 
-const todayDetail = `Trong phiên, chỉ số dao động trong khoảng từ ${fmt(latest.low)} đến ${fmt(latest.high)} điểm, với khối lượng giao dịch toàn thị trường đạt khoảng ${volumeMillions} triệu cổ phiếu, ${volumeAdj}.`;
+const todayDetailSentences = [
+  `Trong phiên, chỉ số dao động từ ${fmt(latest.low)} đến ${fmt(latest.high)} điểm.`,
+  `Khối lượng giao dịch toàn thị trường đạt khoảng ${volumeMillions} triệu cổ phiếu, ${volumeAdj}.`,
+];
 
 const vsMinText =
   pctAboveMin < 0.05
-    ? "cũng chính là mức thấp nhất"
+    ? "cũng chính là mức thấp nhất của giai đoạn này"
     : `cao hơn khoảng ${fmt(pctAboveMin)} phần trăm so với mức thấp nhất`;
 const vsMaxText =
   pctBelowMax < 0.05
-    ? "cũng chính là mức cao nhất"
+    ? "cũng chính là mức cao nhất của giai đoạn này"
     : `thấp hơn khoảng ${fmt(pctBelowMax)} phần trăm so với mức cao nhất`;
 
-const range30 = `Nhìn lại ba mươi phiên giao dịch gần nhất, chỉ số đã dao động trong biên độ từ ${fmt(min30)} đến ${fmt(max30)} điểm, với mức đóng cửa hiện tại ${vsMinText} và ${vsMaxText} của giai đoạn này, còn tính chung cả ba mươi phiên, VN Index đã ${overallTrendWord} khoảng ${fmt(Math.abs(overallChangePercent30))} phần trăm.`;
-
-const trend30 = `Trong ba mươi phiên gần nhất, thị trường ghi nhận ${upDays} phiên tăng điểm và ${downDays} phiên giảm điểm.`;
-
-const outro = "Đây là bản tin tổng hợp dữ liệu tự động, không phải khuyến nghị đầu tư, xin cảm ơn quý vị đã theo dõi.";
-
-const segments = [
-  { id: "hook", text: hook },
-  { id: "headline", text: headline },
-  { id: "todayDetail", text: todayDetail },
-  { id: "range30", text: range30 },
-  { id: "trend30", text: trend30 },
-  { id: "outro", text: outro },
+const range30Sentences = [
+  `Nhìn lại ba mươi phiên gần nhất, chỉ số dao động trong biên độ từ ${fmt(min30)} đến ${fmt(max30)} điểm.`,
+  `Mức đóng cửa hiện tại ${vsMinText}, và ${vsMaxText}.`,
+  `Tính chung cả giai đoạn, VN Index đã ${overallTrendWord} khoảng ${fmt(Math.abs(overallChangePercent30))} phần trăm.`,
 ];
 
-const text = segments.map((s) => s.text).join(" ");
+const trend30Sentences = [
+  `Trong ba mươi phiên gần nhất, thị trường ghi nhận ${upDays} phiên tăng điểm và ${downDays} phiên giảm điểm.`,
+];
 
-console.log(`Generating voiceover (${voiceName}): "${text}"`);
+const outroSentences = [
+  "Đây là bản tin tổng hợp dữ liệu tự động, không phải khuyến nghị đầu tư.",
+  "Xin cảm ơn quý vị đã theo dõi.",
+];
+
+const segments = [
+  { id: "hook", sentences: [hook] },
+  { id: "headline", sentences: headlineSentences },
+  { id: "todayDetail", sentences: todayDetailSentences },
+  { id: "range30", sentences: range30Sentences },
+  { id: "trend30", sentences: trend30Sentences },
+  { id: "outro", sentences: outroSentences },
+];
+
+const allSentences = segments.flatMap((s) => s.sentences);
+const text = allSentences.join(" ");
+
+console.log(`Generating voiceover (${voiceName}, rate ${speechRate}): "${text}"`);
 
 const outDir = path.join(root, "public", "voiceover");
 mkdirSync(outDir, { recursive: true });
@@ -156,7 +178,7 @@ for (let attempt = 1; attempt <= 3; attempt++) {
     await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, {
       sentenceBoundaryEnabled: true,
     });
-    ({ audioFilePath, metadataFilePath } = await tts.toFile(tmpDir, text));
+    ({ audioFilePath, metadataFilePath } = await tts.toFile(tmpDir, text, { rate: speechRate }));
     lastError = null;
     break;
   } catch (err) {
@@ -174,6 +196,7 @@ renameSync(audioFilePath, finalAudioPath);
 console.log(`Wrote ${finalAudioPath}`);
 
 // --- Build beats.json from sentence-boundary metadata (best-effort) ---
+// Each segment's beat = the start time of its FIRST sentence.
 const beatsPath = path.join(outDir, "vnindex-latest.beats.json");
 try {
   if (!metadataFilePath || !existsSync(metadataFilePath)) {
@@ -184,20 +207,22 @@ try {
     (m) => m.Type === "SentenceBoundary",
   );
 
-  if (sentenceEvents.length !== segments.length) {
+  if (sentenceEvents.length !== allSentences.length) {
     throw new Error(
-      `Expected ${segments.length} sentence boundaries, got ${sentenceEvents.length} — skipping sync data`,
+      `Expected ${allSentences.length} sentence boundaries, got ${sentenceEvents.length} — skipping sync data`,
     );
   }
 
   const beats = {};
-  segments.forEach((seg, i) => {
-    const offsetTicks = sentenceEvents[i].Data.Offset; // 100ns ticks
+  let cursor = 0;
+  for (const seg of segments) {
+    const offsetTicks = sentenceEvents[cursor].Data.Offset; // 100ns ticks
     beats[seg.id] = {
       startMs: Math.round(offsetTicks / 10000),
-      text: seg.text,
+      text: seg.sentences.join(" "),
     };
-  });
+    cursor += seg.sentences.length;
+  }
 
   writeFileSync(beatsPath, JSON.stringify(beats, null, 2));
   console.log(`Wrote ${beatsPath}`);
