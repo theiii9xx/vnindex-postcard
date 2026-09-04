@@ -1,10 +1,10 @@
 import "./index.css";
-import { MyComposition } from "./Composition";
+import { VNIndexPostcardComposition } from "./VNIndexPostcard";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <>
-      <MyComposition />
+      <VNIndexPostcardComposition />
     </>
   );
 };
