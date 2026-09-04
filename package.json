@@ -8,6 +8,7 @@
   "dependencies": {
     "@remotion/cli": "4.0.520",
     "@remotion/google-fonts": "4.0.520",
+    "@remotion/media": "4.0.520",
     "@remotion/tailwind-v4": "4.0.520",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -28,7 +29,8 @@
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
     "fetch-data": "node scripts/fetch-vnindex.mjs 30",
-    "render": "npm run fetch-data && node scripts/render-daily.mjs"
+    "generate-voiceover": "node --env-file-if-exists=.env scripts/generate-voiceover.mjs",
+    "render": "npm run fetch-data && npm run generate-voiceover && node scripts/render-daily.mjs"
   },
   "sideEffects": [
     "*.css"

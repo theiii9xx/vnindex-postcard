@@ -9,6 +9,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { Audio } from "@remotion/media";
 import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
 import { VNIndexBar } from "./fetchVNIndex";
 
@@ -28,6 +29,7 @@ const IDLE_START = 150;
 
 type Props = {
   bars: VNIndexBar[];
+  hasVoiceover: boolean;
 };
 
 const calculateMetadata: CalculateMetadataFunction<Props> = async ({
@@ -46,8 +48,17 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({
 
   const bars = (await response.json()) as VNIndexBar[];
 
+  // Voiceover is optional (only generated when ELEVENLABS_API_KEY is set —
+  // see scripts/generate-voiceover.mjs), so check whether the file exists
+  // rather than assuming it does.
+  const voiceoverCheck = await fetch(staticFile("voiceover/vnindex-latest.mp3"), {
+    method: "HEAD",
+    signal: abortSignal,
+  }).catch(() => null);
+  const hasVoiceover = Boolean(voiceoverCheck && voiceoverCheck.ok);
+
   return {
-    props: { bars },
+    props: { bars, hasVoiceover },
   };
 };
 
@@ -60,7 +71,7 @@ export const VNIndexPostcardComposition = () => {
       fps={FPS}
       width={WIDTH}
       height={HEIGHT}
-      defaultProps={{ bars: [] as VNIndexBar[] }}
+      defaultProps={{ bars: [] as VNIndexBar[], hasVoiceover: false }}
       calculateMetadata={calculateMetadata}
     />
   );
@@ -85,7 +96,7 @@ const formatDate = (unixSeconds: number) => {
   });
 };
 
-export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
+export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
   const frame = useCurrentFrame();
 
   if (!bars || bars.length < 2) {
@@ -213,6 +224,10 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
         background: "linear-gradient(160deg, #0b1220 0%, #111c33 55%, #0b1220 100%)",
       }}
     >
+      {hasVoiceover && (
+        <Audio src={staticFile("voiceover/vnindex-latest.mp3")} from={20} />
+      )}
+
       {/* Ambient glow orb, slowly drifting behind the card */}
       <div
         style={{
