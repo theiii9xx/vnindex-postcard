@@ -10,6 +10,8 @@
     "@remotion/google-fonts": "4.0.520",
     "@remotion/media": "4.0.520",
     "@remotion/tailwind-v4": "4.0.520",
+    "mediabunny": "1.55.5",
+    "msedge-tts": "2.0.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.520",
@@ -29,7 +31,7 @@
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
     "fetch-data": "node scripts/fetch-vnindex.mjs 30",
-    "generate-voiceover": "node --env-file-if-exists=.env scripts/generate-voiceover.mjs",
+    "generate-voiceover": "node scripts/generate-voiceover.mjs",
     "render": "npm run fetch-data && npm run generate-voiceover && node scripts/render-daily.mjs"
   },
   "sideEffects": [
