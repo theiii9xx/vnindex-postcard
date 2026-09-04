@@ -5,3 +5,6 @@ dist
 
 # Ignore the output video from Git but not videos you import into src/.
 out
+
+# Local render logs from the Task Scheduler job (scripts/run-daily-render.ps1)
+logs

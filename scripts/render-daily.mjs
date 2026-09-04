@@ -21,7 +21,14 @@ console.log(`Rendering VNIndexPostcard -> ${outFile}`);
 execFileSync(
   "npx",
   ["remotion", "render", "VNIndexPostcard", outFile],
-  { cwd: root, stdio: "inherit", shell: process.platform === "win32" },
+  {
+    cwd: root,
+    stdio: "inherit",
+    shell: process.platform === "win32",
+    // Silence the harmless DEP0190 warning that `shell: true` triggers on Windows
+    // (child stderr output gets misread as a failure by some log wrappers).
+    env: { ...process.env, NODE_OPTIONS: "--no-deprecation" },
+  },
 );
 
 console.log(`Done: ${outFile}`);
