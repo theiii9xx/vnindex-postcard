@@ -20,7 +20,11 @@ const { fontFamily } = loadFont("normal", {
 const WIDTH = 1080;
 const HEIGHT = 1080;
 const FPS = 30;
-const DURATION_IN_FRAMES = 8 * FPS;
+const DURATION_IN_FRAMES = 60 * FPS;
+// Entrance animation settles by ~150f; everything after that is a slow ambient
+// idle loop (glow orb, breathing badge, traveling chart marker) so the extra
+// ~58s isn't just a frozen frame.
+const IDLE_START = 150;
 
 type Props = {
   bars: VNIndexBar[];
@@ -156,6 +160,18 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
   });
 
+  // --- Ambient idle loop (keeps the remaining ~58s alive without new data) ---
+  const idleT = Math.max(0, frame - IDLE_START) / FPS; // seconds since idle started
+  const orbX = 50 + Math.sin(idleT * 0.35) * 22;
+  const orbY = 42 + Math.cos(idleT * 0.27) * 18;
+  const badgeBreathe = 1 + Math.sin(idleT * Math.PI * 0.5) * 0.02;
+  const glowPulse = 0.5 + Math.sin(idleT * Math.PI * 0.5) * 0.15;
+
+  // Marker that slowly travels back and forth along the trend line.
+  const travelLoop = 6 * FPS; // 6s to cross the chart, then reverse
+  const travelRaw = (Math.max(0, frame - IDLE_START) % (travelLoop * 2)) / travelLoop;
+  const travelT = travelRaw <= 1 ? travelRaw : 2 - travelRaw; // 0->1->0 ping-pong
+
   // --- Chart geometry ---
   const chartWidth = WIDTH - 160;
   const chartHeight = 300;
@@ -176,6 +192,20 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
 
   const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
 
+  // Position of the ambient traveling marker along the polyline at travelT (0..1).
+  const travelX = travelT * chartWidth;
+  let travelPoint = points[points.length - 1];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (travelX >= points[i].x && travelX <= points[i + 1].x) {
+      const segT = (travelX - points[i].x) / (points[i + 1].x - points[i].x || 1);
+      travelPoint = {
+        x: travelX,
+        y: points[i].y + (points[i + 1].y - points[i].y) * segT,
+      };
+      break;
+    }
+  }
+
   return (
     <AbsoluteFill
       style={{
@@ -183,6 +213,22 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
         background: "linear-gradient(160deg, #0b1220 0%, #111c33 55%, #0b1220 100%)",
       }}
     >
+      {/* Ambient glow orb, slowly drifting behind the card */}
+      <div
+        style={{
+          position: "absolute",
+          left: `${orbX}%`,
+          top: `${orbY}%`,
+          translate: "-50% -50%",
+          width: 640,
+          height: 640,
+          borderRadius: "50%",
+          background: accentColor,
+          opacity: glowPulse * 0.18,
+          filter: "blur(140px)",
+        }}
+      />
+
       <AbsoluteFill
         style={{
           justifyContent: "center",
@@ -264,10 +310,11 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
             style={{
               marginTop: 28,
               opacity: badgeIn,
-              scale: interpolate(badgeIn, [0, 1], [0.9, 1], {
-                easing: Easing.spring({ damping: 200 }),
-                output: "perceptual-scale",
-              }),
+              scale:
+                interpolate(badgeIn, [0, 1], [0.9, 1], {
+                  easing: Easing.spring({ damping: 200 }),
+                  output: "perceptual-scale",
+                }) * badgeBreathe,
               display: "flex",
               alignItems: "center",
               gap: 12,
@@ -321,6 +368,23 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars }) => {
                 pathLength={1}
                 strokeDasharray={1}
                 strokeDashoffset={interpolate(chartIn, [0, 1], [1, 0])}
+              />
+              {/* Ambient marker slowly traveling along the trend line */}
+              <circle
+                cx={travelPoint.x}
+                cy={travelPoint.y}
+                r={18}
+                fill={accentColor}
+                opacity={chartIn * 0.25}
+              />
+              <circle
+                cx={travelPoint.x}
+                cy={travelPoint.y}
+                r={7}
+                fill={accentColor}
+                stroke="white"
+                strokeWidth={2}
+                opacity={chartIn}
               />
             </svg>
             <div
