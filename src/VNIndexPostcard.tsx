@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   AbsoluteFill,
   CalculateMetadataFunction,
@@ -7,7 +8,6 @@ import {
   interpolate,
   staticFile,
   useCurrentFrame,
-  useVideoConfig,
 } from "remotion";
 import { Audio } from "@remotion/media";
 import { Input, ALL_FORMATS, UrlSource } from "mediabunny";
@@ -21,6 +21,8 @@ const { fontFamily } = loadFont("normal", {
 
 const WIDTH = 1080;
 const HEIGHT = 1080;
+const CHART_WIDTH = WIDTH - 160;
+const CHART_HEIGHT = 250;
 const FPS = 30;
 const DEFAULT_DURATION_IN_FRAMES = 60 * FPS;
 const MAX_DURATION_IN_FRAMES = 90 * FPS; // safety cap in case the narration runs long
@@ -159,6 +161,40 @@ const pulseAt = (
 export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) => {
   const frame = useCurrentFrame();
 
+  // Chart geometry and the up/down-day tally only depend on `bars`, which is
+  // constant for the whole video — memoize instead of recomputing every frame.
+  // (Computed unconditionally, before the early return below, per the Rules of
+  // Hooks — bars.length < 2 just yields empty/zeroed results, unused in that case.)
+  const { points, linePath, areaPath, upDays, downDays } = useMemo(() => {
+    if (!bars || bars.length < 2) {
+      return { points: [], linePath: "", areaPath: "", upDays: 0, downDays: 0 };
+    }
+
+    const closes = bars.map((b) => b.close);
+    const minClose = Math.min(...closes);
+    const maxClose = Math.max(...closes);
+    const range = maxClose - minClose || 1;
+
+    const pts = bars.map((b, i) => ({
+      x: (i / (bars.length - 1)) * CHART_WIDTH,
+      y: CHART_HEIGHT - ((b.close - minClose) / range) * CHART_HEIGHT,
+    }));
+
+    const line = pts
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+      .join(" ");
+    const area = `${line} L ${CHART_WIDTH} ${CHART_HEIGHT} L 0 ${CHART_HEIGHT} Z`;
+
+    let up = 0;
+    let down = 0;
+    for (let i = 1; i < bars.length; i++) {
+      if (bars[i].close > bars[i - 1].close) up++;
+      else if (bars[i].close < bars[i - 1].close) down++;
+    }
+
+    return { points: pts, linePath: line, areaPath: area, upDays: up, downDays: down };
+  }, [bars]);
+
   if (!bars || bars.length < 2) {
     return (
       <AbsoluteFill
@@ -192,13 +228,6 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
     : isUp
       ? "rgba(239,68,68,0.15)"
       : "rgba(34,197,94,0.15)";
-
-  let upDays = 0;
-  let downDays = 0;
-  for (let i = 1; i < bars.length; i++) {
-    if (bars[i].close > bars[i - 1].close) upDays++;
-    else if (bars[i].close < bars[i - 1].close) downDays++;
-  }
 
   // --- Voiceover sync beats ---
   // Convert each beats.json timestamp (ms into the narration) to an absolute
@@ -274,25 +303,10 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
   const travelRaw = (Math.max(0, frame - IDLE_START) % (travelLoop * 2)) / travelLoop;
   const travelT = travelRaw <= 1 ? travelRaw : 2 - travelRaw; // 0->1->0 ping-pong
 
-  // --- Chart geometry ---
-  const chartWidth = WIDTH - 160;
-  const chartHeight = 250;
-  const closes = bars.map((b) => b.close);
-  const minClose = Math.min(...closes);
-  const maxClose = Math.max(...closes);
-  const range = maxClose - minClose || 1;
-
-  const points = bars.map((b, i) => {
-    const x = (i / (bars.length - 1)) * chartWidth;
-    const y = chartHeight - ((b.close - minClose) / range) * chartHeight;
-    return { x, y };
-  });
-
-  const linePath = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
-    .join(" ");
-
-  const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
+  // Chart geometry (points/linePath/areaPath/upDays/downDays) comes from the
+  // useMemo block above — only travel-marker placement is computed per frame.
+  const chartWidth = CHART_WIDTH;
+  const chartHeight = CHART_HEIGHT;
 
   // Position of the ambient traveling marker along the polyline at travelT (0..1).
   const travelX = travelT * chartWidth;
