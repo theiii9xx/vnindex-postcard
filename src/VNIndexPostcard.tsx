@@ -28,10 +28,17 @@ const MAX_DURATION_IN_FRAMES = 90 * FPS; // safety cap in case the narration run
 // idle loop (glow orb, breathing badge, traveling chart marker) so the rest of
 // the video isn't just a frozen frame.
 const IDLE_START = 150;
+// Matches the `from` prop on the <Audio> element below — the frame offset at
+// which narration starts, used to convert beats.json timestamps to frames.
+const AUDIO_START_FRAME = 20;
+
+type Beat = { startMs: number; text: string };
+type Beats = Partial<Record<"hook" | "headline" | "todayDetail" | "range30" | "trend30" | "outro", Beat>>;
 
 type Props = {
   bars: VNIndexBar[];
   hasVoiceover: boolean;
+  beats: Beats | null;
 };
 
 const calculateMetadata: CalculateMetadataFunction<Props> = async ({
@@ -60,6 +67,19 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({
   }).catch(() => null);
   const hasVoiceover = Boolean(voiceoverCheck && voiceoverCheck.ok);
 
+  // Beats (per-sentence start times) are optional too — written by
+  // generate-voiceover.mjs only when Edge TTS's sentence-boundary count
+  // matched our script exactly. Used to sync visual "beats" to the narration.
+  let beats: Beats | null = null;
+  if (hasVoiceover) {
+    const beatsResponse = await fetch(staticFile("voiceover/vnindex-latest.beats.json"), {
+      signal: abortSignal,
+    }).catch(() => null);
+    if (beatsResponse && beatsResponse.ok) {
+      beats = (await beatsResponse.json()) as Beats;
+    }
+  }
+
   // Size the video to the narration so it's never cut off mid-sentence: default
   // to 60s, but stretch (up to a cap) if the generated voiceover runs longer.
   let durationInFrames = DEFAULT_DURATION_IN_FRAMES;
@@ -80,7 +100,7 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({
 
   return {
     durationInFrames,
-    props: { bars, hasVoiceover },
+    props: { bars, hasVoiceover, beats },
   };
 };
 
@@ -93,7 +113,7 @@ export const VNIndexPostcardComposition = () => {
       fps={FPS}
       width={WIDTH}
       height={HEIGHT}
-      defaultProps={{ bars: [] as VNIndexBar[], hasVoiceover: false }}
+      defaultProps={{ bars: [] as VNIndexBar[], hasVoiceover: false, beats: null }}
       calculateMetadata={calculateMetadata}
     />
   );
@@ -118,7 +138,25 @@ const formatDate = (unixSeconds: number) => {
   });
 };
 
-export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
+// A quick attack / hold / decay pulse curve (0 -> 1 -> 0) starting at `startFrame`.
+// Used to flash/emphasize an element right when the narrator mentions it.
+const pulseAt = (
+  frame: number,
+  startFrame: number | undefined,
+  attack = 6,
+  hold = 8,
+  decay = 26,
+) => {
+  if (startFrame === undefined) return 0;
+  return interpolate(
+    frame,
+    [startFrame, startFrame + attack, startFrame + attack + hold, startFrame + attack + hold + decay],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+};
+
+export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) => {
   const frame = useCurrentFrame();
 
   if (!bars || bars.length < 2) {
@@ -154,6 +192,37 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
     : isUp
       ? "rgba(239,68,68,0.15)"
       : "rgba(34,197,94,0.15)";
+
+  let upDays = 0;
+  let downDays = 0;
+  for (let i = 1; i < bars.length; i++) {
+    if (bars[i].close > bars[i - 1].close) upDays++;
+    else if (bars[i].close < bars[i - 1].close) downDays++;
+  }
+
+  // --- Voiceover sync beats ---
+  // Convert each beats.json timestamp (ms into the narration) to an absolute
+  // frame, offset by where the <Audio> track actually starts.
+  const beatFrame = (id: keyof Beats) => {
+    const beat = beats?.[id];
+    if (!beat) return undefined;
+    return AUDIO_START_FRAME + Math.round((beat.startMs / 1000) * FPS);
+  };
+  const headlineBeat = beatFrame("headline");
+  const todayDetailBeat = beatFrame("todayDetail");
+  const range30Beat = beatFrame("range30");
+  const trend30Beat = beatFrame("trend30");
+
+  const headlinePulse = pulseAt(frame, headlineBeat);
+  const todayDetailPulse = pulseAt(frame, todayDetailBeat);
+  const range30Pulse = pulseAt(frame, range30Beat, 10, 14, 50);
+  // The up/down-days stat row appears (and stays) once the narrator reaches it;
+  // fall back to right after the chart finishes drawing when there's no sync data.
+  const trendRowIn = interpolate(frame, [trend30Beat ?? 150, (trend30Beat ?? 150) + 18], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.bezier(0.16, 1, 0.3, 1),
+  });
 
   // --- Animations ---
   const cardIn = interpolate(frame, [0, 18], [0, 1], {
@@ -207,7 +276,7 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
 
   // --- Chart geometry ---
   const chartWidth = WIDTH - 160;
-  const chartHeight = 300;
+  const chartHeight = 250;
   const closes = bars.map((b) => b.close);
   const minClose = Math.min(...closes);
   const maxClose = Math.max(...closes);
@@ -289,7 +358,7 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            padding: "72px 64px 56px",
+            padding: "56px 64px 36px",
           }}
         >
           {/* Header */}
@@ -330,12 +399,14 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
           <Interactive.Div
             name="BigNumber"
             style={{
-              marginTop: 44,
-              fontSize: 168,
+              marginTop: 32,
+              fontSize: 150,
               fontWeight: 800,
               color: "white",
               lineHeight: 1,
               letterSpacing: -2,
+              scale: 1 + headlinePulse * 0.035,
+              textShadow: `0 0 ${headlinePulse * 60}px ${accentColor}${headlinePulse > 0.05 ? "aa" : "00"}`,
             }}
           >
             {formatPoints(displayedClose)}
@@ -345,26 +416,28 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
           <Interactive.Div
             name="ChangeBadge"
             style={{
-              marginTop: 28,
+              marginTop: 20,
               opacity: badgeIn,
               scale:
                 interpolate(badgeIn, [0, 1], [0.9, 1], {
                   easing: Easing.spring({ damping: 200 }),
                   output: "perceptual-scale",
-                }) * badgeBreathe,
+                }) *
+                badgeBreathe *
+                (1 + headlinePulse * 0.05),
               display: "flex",
               alignItems: "center",
               gap: 12,
-              padding: "16px 32px",
+              padding: "12px 28px",
               borderRadius: 999,
               background: accentColorSoft,
               border: `1px solid ${accentColor}55`,
             }}
           >
-            <div style={{ fontSize: 48, fontWeight: 700, color: accentColor }}>
+            <div style={{ fontSize: 40, fontWeight: 700, color: accentColor }}>
               {isFlat ? "◆" : isUp ? "▲" : "▼"}
             </div>
-            <div style={{ fontSize: 48, fontWeight: 700, color: accentColor }}>
+            <div style={{ fontSize: 40, fontWeight: 700, color: accentColor }}>
               {isUp ? "+" : ""}
               {formatPoints(change)} ({isUp ? "+" : ""}
               {changePercent.toFixed(2)}%)
@@ -375,8 +448,9 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
           <Interactive.Div
             name="Chart"
             style={{
-              marginTop: 56,
+              marginTop: 36,
               width: chartWidth,
+              scale: 1 + range30Pulse * 0.02,
               opacity: interpolate(chartIn, [0, 0.3], [0, 1], {
                 extrapolateLeft: "clamp",
                 extrapolateRight: "clamp",
@@ -393,8 +467,31 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
                   <stop offset="0%" stopColor={accentColor} stopOpacity={0.35} />
                   <stop offset="100%" stopColor={accentColor} stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="sweepFill" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="white" stopOpacity={0} />
+                  <stop offset="50%" stopColor="white" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="white" stopOpacity={0} />
+                </linearGradient>
               </defs>
               <path d={areaPath} fill="url(#areaFill)" opacity={chartIn} />
+              {/* Highlight sweep across the 30-day range, timed to the "range30" narration beat */}
+              {range30Pulse > 0.01 && (
+                <rect
+                  x={
+                    interpolate(
+                      frame,
+                      [range30Beat ?? 0, (range30Beat ?? 0) + 74],
+                      [-60, chartWidth + 60],
+                      { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+                    ) - 60
+                  }
+                  y={-10}
+                  width={120}
+                  height={chartHeight + 20}
+                  fill="url(#sweepFill)"
+                  opacity={range30Pulse * 0.6}
+                />
+              )}
               <path
                 d={linePath}
                 fill="none"
@@ -439,6 +536,51 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
             </div>
           </Interactive.Div>
 
+          {/* Up/down days — revealed in sync with the "trend30" narration beat */}
+          <Interactive.Div
+            name="TrendDaysRow"
+            style={{
+              marginTop: 14,
+              opacity: trendRowIn,
+              translate: `0px ${interpolate(trendRowIn, [0, 1], [10, 0])}px`,
+              display: "flex",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 18px",
+                borderRadius: 999,
+                background: "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.35)",
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#ef4444",
+              }}
+            >
+              ▲ {upDays} phiên tăng
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 18px",
+                borderRadius: 999,
+                background: "rgba(34,197,94,0.12)",
+                border: "1px solid rgba(34,197,94,0.35)",
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#22c55e",
+              }}
+            >
+              ▼ {downDays} phiên giảm
+            </div>
+          </Interactive.Div>
+
           {/* Footer */}
           <Interactive.Div
             name="Footer"
@@ -449,13 +591,20 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover }) => {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              paddingTop: 32,
+              paddingTop: 20,
               borderTop: "1px solid rgba(255,255,255,0.08)",
-              fontSize: 28,
+              fontSize: 26,
               color: "rgba(255,255,255,0.5)",
             }}
           >
-            <span>KLGD: {formatVolume(latest.volume)}</span>
+            <span
+              style={{
+                color: `rgba(255,255,255,${0.5 + todayDetailPulse * 0.5})`,
+                scale: 1 + todayDetailPulse * 0.06,
+              }}
+            >
+              KLGD: {formatVolume(latest.volume)}
+            </span>
             <span>Nguồn: VNDirect</span>
           </Interactive.Div>
         </Interactive.Div>

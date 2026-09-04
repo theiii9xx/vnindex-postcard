@@ -1,0 +1,26 @@
+{
+  "hook": {
+    "startMs": 100,
+    "text": "Tin vui cho nhà đầu tư, VN Index vừa xác lập đỉnh cao mới trong ba mươi phiên giao dịch gần đây."
+  },
+  "headline": {
+    "startMs": 6163,
+    "text": "Chỉ số VN Index đóng cửa phiên ngày 4 tháng 9 tại 1.853,95 điểm, tăng 26,23 điểm, tương ứng 1,44 phần trăm so với phiên liền trước."
+  },
+  "todayDetail": {
+    "startMs": 16688,
+    "text": "Trong phiên, chỉ số dao động trong khoảng từ 1.829,66 đến 1.862,63 điểm, với khối lượng giao dịch toàn thị trường đạt khoảng 388,8 triệu cổ phiếu, khá trầm lắng so với trung bình gần đây."
+  },
+  "range30": {
+    "startMs": 30088,
+    "text": "Nhìn lại ba mươi phiên giao dịch gần nhất, chỉ số đã dao động trong biên độ từ 1.668,53 đến 1.853,95 điểm, với mức đóng cửa hiện tại cao hơn khoảng 11,11 phần trăm so với mức thấp nhất và cũng chính là mức cao nhất của giai đoạn này, còn tính chung cả ba mươi phiên, VN Index đã tăng khoảng 11,11 phần trăm."
+  },
+  "trend30": {
+    "startMs": 49513,
+    "text": "Trong ba mươi phiên gần nhất, thị trường ghi nhận 18 phiên tăng điểm và 11 phiên giảm điểm."
+  },
+  "outro": {
+    "startMs": 55063,
+    "text": "Đây là bản tin tổng hợp dữ liệu tự động, không phải khuyến nghị đầu tư, xin cảm ơn quý vị đã theo dõi."
+  }
+}
