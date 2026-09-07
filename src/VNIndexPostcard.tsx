@@ -42,7 +42,12 @@ const LED = { up: "#2ee878", down: "#ff3b3b", flat: "#ffb020" };
 const WIDTH = 1080;
 const HEIGHT = 1080;
 const CHART_WIDTH = WIDTH - 160;
-const CHART_HEIGHT = 250;
+// Candlestick price area + a companion volume-bar strip underneath it — the
+// two visuals every real trading terminal pairs together, not just a line.
+const PRICE_HEIGHT = 190;
+const VOLUME_HEIGHT = 54;
+const CHART_GAP = 10;
+const CHART_TOTAL_HEIGHT = PRICE_HEIGHT + CHART_GAP + VOLUME_HEIGHT;
 const FPS = 30;
 const DEFAULT_DURATION_IN_FRAMES = 60 * FPS;
 const MAX_DURATION_IN_FRAMES = 90 * FPS; // safety cap in case the narration runs long
@@ -185,34 +190,71 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
   // constant for the whole video — memoize instead of recomputing every frame.
   // (Computed unconditionally, before the early return below, per the Rules of
   // Hooks — bars.length < 2 just yields empty/zeroed results, unused in that case.)
-  const { points, linePath, areaPath, upDays, downDays } = useMemo(() => {
+  const { points, linePath, areaPath, candles, volumeBars, upDays, downDays } = useMemo(() => {
     if (!bars || bars.length < 2) {
-      return { points: [], linePath: "", areaPath: "", upDays: 0, downDays: 0 };
+      return { points: [], linePath: "", areaPath: "", candles: [], volumeBars: [], upDays: 0, downDays: 0 };
     }
 
-    const closes = bars.map((b) => b.close);
-    const minClose = Math.min(...closes);
-    const maxClose = Math.max(...closes);
-    const range = maxClose - minClose || 1;
+    const n = bars.length;
+    const lows = bars.map((b) => b.low);
+    const highs = bars.map((b) => b.high);
+    const priceMin = Math.min(...lows);
+    const priceMax = Math.max(...highs);
+    const priceRange = priceMax - priceMin || 1;
+    const yFor = (v: number) => PRICE_HEIGHT - ((v - priceMin) / priceRange) * PRICE_HEIGHT;
 
-    const pts = bars.map((b, i) => ({
-      x: (i / (bars.length - 1)) * CHART_WIDTH,
-      y: CHART_HEIGHT - ((b.close - minClose) / range) * CHART_HEIGHT,
+    const slotWidth = CHART_WIDTH / n;
+    const bodyWidth = Math.max(2, slotWidth * 0.55);
+
+    const candleData = bars.map((b) => {
+      const isUpCandle = b.close >= b.open;
+      const bodyTopVal = Math.max(b.open, b.close);
+      const bodyBottomVal = Math.min(b.open, b.close);
+      const bodyTop = yFor(bodyTopVal);
+      const bodyBottom = yFor(bodyBottomVal);
+      return {
+        wickTop: yFor(b.high),
+        wickBottom: yFor(b.low),
+        bodyTop,
+        bodyHeight: Math.max(1.5, bodyBottom - bodyTop),
+        isUp: isUpCandle,
+      };
+    });
+
+    const maxVolume = Math.max(...bars.map((b) => b.volume)) || 1;
+    const volumeData = bars.map((b, i) => ({
+      height: (b.volume / maxVolume) * VOLUME_HEIGHT,
+      isUp: b.close >= (i > 0 ? bars[i - 1].close : b.open),
     }));
 
+    // Shared x slot for both the candlesticks and the volume bars below them.
+    const withX = <T,>(arr: T[]) => arr.map((d, i) => ({ ...d, x: i * slotWidth + slotWidth / 2 }));
+
+    // Close-price trend line in the SAME price scale as the candlesticks — kept
+    // as a subtle underlay so the ambient traveling marker / sweep highlight
+    // (built around a simple polyline) still has a path to ride on.
+    const pts = bars.map((b, i) => ({ x: (i / (n - 1)) * CHART_WIDTH, y: yFor(b.close) }));
     const line = pts
       .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
       .join(" ");
-    const area = `${line} L ${CHART_WIDTH} ${CHART_HEIGHT} L 0 ${CHART_HEIGHT} Z`;
+    const area = `${line} L ${CHART_WIDTH} ${PRICE_HEIGHT} L 0 ${PRICE_HEIGHT} Z`;
 
     let up = 0;
     let down = 0;
-    for (let i = 1; i < bars.length; i++) {
+    for (let i = 1; i < n; i++) {
       if (bars[i].close > bars[i - 1].close) up++;
       else if (bars[i].close < bars[i - 1].close) down++;
     }
 
-    return { points: pts, linePath: line, areaPath: area, upDays: up, downDays: down };
+    return {
+      points: pts,
+      linePath: line,
+      areaPath: area,
+      candles: withX(candleData).map((c) => ({ ...c, width: bodyWidth })),
+      volumeBars: withX(volumeData).map((v) => ({ ...v, width: bodyWidth })),
+      upDays: up,
+      downDays: down,
+    };
   }, [bars]);
 
   if (!bars || bars.length < 2) {
@@ -334,10 +376,10 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
   const travelRaw = (Math.max(0, frame - IDLE_START) % (travelLoop * 2)) / travelLoop;
   const travelT = travelRaw <= 1 ? travelRaw : 2 - travelRaw; // 0->1->0 ping-pong
 
-  // Chart geometry (points/linePath/areaPath/upDays/downDays) comes from the
-  // useMemo block above — only travel-marker placement is computed per frame.
+  // Chart geometry (points/linePath/areaPath/candles/volumeBars/upDays/downDays)
+  // comes from the useMemo block above — only travel-marker placement below is
+  // computed per frame.
   const chartWidth = CHART_WIDTH;
-  const chartHeight = CHART_HEIGHT;
 
   // Position of the ambient traveling marker along the polyline at travelT (0..1).
   const travelX = travelT * chartWidth;
@@ -555,12 +597,12 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
           >
             <svg
               width={chartWidth}
-              height={chartHeight}
-              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              height={CHART_TOTAL_HEIGHT}
+              viewBox={`0 0 ${chartWidth} ${CHART_TOTAL_HEIGHT}`}
             >
               <defs>
                 <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={accentColor} stopOpacity={0.22} />
+                  <stop offset="0%" stopColor={accentColor} stopOpacity={0.16} />
                   <stop offset="100%" stopColor={accentColor} stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="sweepFill" x1="0" y1="0" x2="1" y2="0">
@@ -569,19 +611,57 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
                   <stop offset="100%" stopColor="white" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              {/* Reference gridlines, like a board's graph readout */}
+              {/* Reference gridlines for the price area, like a board's graph readout */}
               {[0.25, 0.5, 0.75].map((t) => (
                 <line
                   key={t}
                   x1={0}
                   x2={chartWidth}
-                  y1={chartHeight * t}
-                  y2={chartHeight * t}
+                  y1={PRICE_HEIGHT * t}
+                  y2={PRICE_HEIGHT * t}
                   stroke={COLORS.hairline}
                   strokeWidth={1}
                 />
               ))}
-              <path d={areaPath} fill="url(#areaFill)" opacity={chartIn} />
+              {/* Close-price trend line — a quiet underlay beneath the candles,
+                  kept mainly so the ambient marker/sweep have a path to ride on */}
+              <path d={areaPath} fill="url(#areaFill)" opacity={chartIn * 0.6} />
+              <path
+                d={linePath}
+                fill="none"
+                stroke={accentColor}
+                strokeWidth={1.5}
+                strokeOpacity={0.35}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                pathLength={1}
+                strokeDasharray={1}
+                strokeDashoffset={interpolate(chartIn, [0, 1], [1, 0])}
+              />
+              {/* Candlesticks — real open/high/low/close, the actual shape of a market chart */}
+              <g opacity={chartIn}>
+                {candles.map((c, i) => (
+                  <g key={i}>
+                    <line
+                      x1={c.x}
+                      x2={c.x}
+                      y1={c.wickTop}
+                      y2={c.wickBottom}
+                      stroke={c.isUp ? LED.up : LED.down}
+                      strokeWidth={1.5}
+                      opacity={0.85}
+                    />
+                    <rect
+                      x={c.x - c.width / 2}
+                      y={c.bodyTop}
+                      width={c.width}
+                      height={c.bodyHeight}
+                      fill={c.isUp ? LED.up : LED.down}
+                      opacity={0.9}
+                    />
+                  </g>
+                ))}
+              </g>
               {/* Highlight sweep across the 30-day range, timed to the "range30" narration beat */}
               {range30Pulse > 0.01 && (
                 <rect
@@ -595,39 +675,50 @@ export const VNIndexPostcard: React.FC<Props> = ({ bars, hasVoiceover, beats }) 
                   }
                   y={-10}
                   width={120}
-                  height={chartHeight + 20}
+                  height={CHART_TOTAL_HEIGHT + 20}
                   fill="url(#sweepFill)"
                   opacity={range30Pulse * 0.6}
                 />
               )}
-              <path
-                d={linePath}
-                fill="none"
-                stroke={accentColor}
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                pathLength={1}
-                strokeDasharray={1}
-                strokeDashoffset={interpolate(chartIn, [0, 1], [1, 0])}
-              />
-              {/* Ambient marker slowly traveling along the trend line */}
+              {/* Ambient marker slowly traveling along the close-price line */}
               <circle
                 cx={travelPoint.x}
                 cy={travelPoint.y}
-                r={14}
+                r={12}
                 fill={accentColor}
-                opacity={chartIn * 0.2}
+                opacity={chartIn * 0.18}
               />
               <circle
                 cx={travelPoint.x}
                 cy={travelPoint.y}
-                r={5}
+                r={4}
                 fill={accentColor}
                 stroke="white"
-                strokeWidth={1.5}
+                strokeWidth={1.2}
                 opacity={chartIn}
               />
+              {/* Volume — the companion bar strip every real price chart pairs with */}
+              <line
+                x1={0}
+                x2={chartWidth}
+                y1={PRICE_HEIGHT + CHART_GAP / 2}
+                y2={PRICE_HEIGHT + CHART_GAP / 2}
+                stroke={COLORS.hairline}
+                strokeWidth={1}
+              />
+              <g opacity={chartIn}>
+                {volumeBars.map((v, i) => (
+                  <rect
+                    key={i}
+                    x={v.x - v.width / 2}
+                    y={PRICE_HEIGHT + CHART_GAP + (VOLUME_HEIGHT - v.height)}
+                    width={v.width}
+                    height={v.height}
+                    fill={v.isUp ? LED.up : LED.down}
+                    opacity={0.55}
+                  />
+                ))}
+              </g>
             </svg>
             <div
               style={{

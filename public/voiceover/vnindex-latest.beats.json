@@ -1,26 +1,26 @@
 {
   "hook": {
     "startMs": 100,
-    "text": "Tin vui cho nhà đầu tư, VN Index vừa xác lập đỉnh cao mới trong ba mươi phiên giao dịch gần đây."
+    "text": "Tin vui cho nhà đầu tư. VN Index vừa xác lập đỉnh cao mới trong ba mươi phiên gần đây."
   },
   "headline": {
-    "startMs": 6163,
-    "text": "Chỉ số VN Index đóng cửa phiên ngày 4 tháng 9 tại 1.853,42 điểm, tăng 25,70 điểm, tương ứng 1,41 phần trăm so với phiên liền trước."
+    "startMs": 6985,
+    "text": "Chỉ số VN Index đóng cửa phiên ngày 4 tháng 9 tại 1853,08 điểm. Tăng 25,36 điểm, tương ứng 1,39 phần trăm so với phiên trước."
   },
   "todayDetail": {
-    "startMs": 16600,
-    "text": "Trong phiên, chỉ số dao động trong khoảng từ 1.829,66 đến 1.862,63 điểm, với khối lượng giao dịch toàn thị trường đạt khoảng 454,5 triệu cổ phiếu, ở mức tương đương trung bình gần đây."
+    "startMs": 18711,
+    "text": "Trong phiên, chỉ số dao động từ 1829,66 đến 1862,63 điểm. Khối lượng giao dịch toàn thị trường đạt khoảng 501,0 triệu cổ phiếu, ở mức tương đương trung bình gần đây."
   },
   "range30": {
-    "startMs": 29663,
-    "text": "Nhìn lại ba mươi phiên giao dịch gần nhất, chỉ số đã dao động trong biên độ từ 1.668,53 đến 1.853,42 điểm, với mức đóng cửa hiện tại cao hơn khoảng 11,08 phần trăm so với mức thấp nhất và cũng chính là mức cao nhất của giai đoạn này, còn tính chung cả ba mươi phiên, VN Index đã tăng khoảng 11,08 phần trăm."
+    "startMs": 32706,
+    "text": "Nhìn lại ba mươi phiên gần nhất, chỉ số dao động trong biên độ từ 1668,53 đến 1853,08 điểm. Mức đóng cửa hiện tại cao hơn khoảng 11,06 phần trăm so với mức thấp nhất, và cũng chính là mức cao nhất của giai đoạn này. Tính chung cả giai đoạn, VN Index đã tăng khoảng 11,06 phần trăm."
   },
   "trend30": {
-    "startMs": 49200,
+    "startMs": 54278,
     "text": "Trong ba mươi phiên gần nhất, thị trường ghi nhận 18 phiên tăng điểm và 11 phiên giảm điểm."
   },
   "outro": {
-    "startMs": 54750,
-    "text": "Đây là bản tin tổng hợp dữ liệu tự động, không phải khuyến nghị đầu tư, xin cảm ơn quý vị đã theo dõi."
+    "startMs": 59987,
+    "text": "Đây là bản tin tổng hợp dữ liệu tự động, không phải khuyến nghị đầu tư. Xin cảm ơn quý vị đã theo dõi."
   }
 }

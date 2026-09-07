@@ -22,6 +22,20 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 
+// Voiceover is a nice-to-have — the video renders fine without it (see
+// VNIndexPostcard.tsx's hasVoiceover check). msedge-tts occasionally throws
+// from an internal event-listener callback (e.g. cleaning up a temp file that
+// was never created after a "no metadata received" hiccup), which lands here
+// as an uncaught exception/rejection rather than somewhere our own try/catch
+// below can reach. Never let that crash the whole `npm run render` chain —
+// log it and exit 0 (fetch-data's data still renders, just without narration).
+for (const event of ["uncaughtException", "unhandledRejection"]) {
+  process.on(event, (err) => {
+    console.log(`Voiceover generation failed unexpectedly (${event}), skipping: ${err?.message ?? err}`);
+    process.exit(0);
+  });
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 
@@ -45,9 +59,14 @@ const changePercent = (change / previous.close) * 100;
 const isFlat = Math.abs(change) < 0.005;
 const trendWord = isFlat ? "đi ngang" : change > 0 ? "tăng" : "giảm";
 
-// vi-VN decimal formatting (comma, not dot) — read naturally by TTS.
-const fmt = (n) => n.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmt1 = (n) => n.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// vi-VN decimal formatting (comma, not dot). For numbers over 999, vi-VN also
+// inserts a "." as the thousands separator (e.g. "1.853,08") — Edge TTS's
+// sentence-boundary detector sometimes misreads that dot as a sentence end,
+// which throws off the beats.json sync (the spoken word is unaffected either
+// way, so just strip it for the sentences we actually send to TTS).
+const fmtRaw = (n) => n.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (n) => fmtRaw(n).replace(/\./g, "");
+const fmt1 = (n) => n.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).replace(/\./g, "");
 const volumeMillions = fmt1(latest.volume / 1_000_000);
 
 // "ngày <d> tháng <m>" spelled out by hand — some Node ICU builds render vi-VN
@@ -147,13 +166,20 @@ const outroSentences = [
   "Xin cảm ơn quý vị đã theo dõi.",
 ];
 
+// Split on ". " so a segment written as one string with an accidental extra
+// full stop (e.g. a hook combining two short sentences) still ends up with
+// the right sentence *count* for matching against Edge TTS's boundary
+// metadata — hand-counting periods across every branch above is exactly the
+// kind of one-off bug that caused a mismatch here before.
+const splitSentences = (text) => text.split(/(?<=[.!])\s+/).filter(Boolean);
+
 const segments = [
-  { id: "hook", sentences: [hook] },
-  { id: "headline", sentences: headlineSentences },
-  { id: "todayDetail", sentences: todayDetailSentences },
-  { id: "range30", sentences: range30Sentences },
-  { id: "trend30", sentences: trend30Sentences },
-  { id: "outro", sentences: outroSentences },
+  { id: "hook", sentences: splitSentences(hook) },
+  { id: "headline", sentences: headlineSentences.flatMap(splitSentences) },
+  { id: "todayDetail", sentences: todayDetailSentences.flatMap(splitSentences) },
+  { id: "range30", sentences: range30Sentences.flatMap(splitSentences) },
+  { id: "trend30", sentences: trend30Sentences.flatMap(splitSentences) },
+  { id: "outro", sentences: outroSentences.flatMap(splitSentences) },
 ];
 
 const allSentences = segments.flatMap((s) => s.sentences);
